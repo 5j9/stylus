@@ -48,13 +48,13 @@
       "matches": ["http://userstyles.org/*", "https://userstyles.org/*"],
       "run_at": "document_start",
       "all_frames": false,
-      "js": ["content/userstyles.js"]
+      "js": ["content/install-userstyles.js"]
     },
     {
       "matches": ["http://freestyler.ws/*", "https://freestyler.ws/*"],
       "run_at": "document_end",
       "all_frames": false,
-      "js": ["content/freestyler.js"]
+      "js": ["content/install-freestyler.js"]
     }
   ],
   "browser_action": {
