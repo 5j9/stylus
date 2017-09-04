@@ -1,4 +1,4 @@
-/* global retranslateCSS */
+/* global pingTabContent getTabRealURLFirefox detectSloppyRegexps */
 'use strict';
 
 let installed;
@@ -9,17 +9,22 @@ const ENTRY_ID_PREFIX_RAW = 'style-';
 const ENTRY_ID_PREFIX = '#' + ENTRY_ID_PREFIX_RAW;
 
 getActiveTab().then(tab =>
-  FIREFOX && tab.url === 'about:blank' && tab.status === 'loading'
-  ? getTabRealURLFirefox(tab)
-  : getTabRealURL(tab)
-).then(url => {
-  tabURL = URLS.supported(url) ? url : '';
+  (FIREFOX && tab.url === 'about:blank' && tab.status === 'loading'
+    ? getTabRealURLFirefox(tab)
+    : getTabRealURL(tab))
+  .then(url => {
+    tabURL = URLS.supported(url) ? url : '';
+    if (tabURL) {
+      pingTabContent(tab);
+    }
+  })
+).then(() =>
   Promise.all([
     tabURL && getStylesSafe({matchUrl: tabURL}),
     onDOMready().then(initPopup),
-  ]).then(([styles]) => {
-    showStyles(styles);
-  });
+  ])
+).then(([styles]) => {
+  showStyles(styles);
 });
 
 chrome.runtime.onMessage.addListener(onRuntimeMessage);
@@ -93,127 +98,13 @@ function initPopup() {
       installed);
   }
 
-  $$('[data-toggle-on-click]').forEach(el => {
-    // dataset on SVG doesn't work in Chrome 49-??, works in 57+
-    const target = $(el.getAttribute('data-toggle-on-click'));
-    el.onclick = () => target.classList.toggle('hidden');
-  });
-
   if (!tabURL) {
     document.body.classList.add('blocked');
     document.body.insertBefore(template.unavailableInfo, document.body.firstChild);
     return;
   }
 
-  const findStylesElement = $('#find-styles-link');
-  findStylesElement.onclick = handleEvent.openURLandHide;
-  function openAndRememberSource(event) {
-    prefs.set('popup.findStylesSource', this.dataset.prefValue, {onlyIfChanged: true});
-    handleEvent.openURLandHide.call(this, event);
-  }
-  $$('#find-styles-sources a').forEach(a => (a.onclick = openAndRememberSource));
-  // touch devices don't have onHover events so the element we'll be toggled via clicking (touching)
-  if ('ontouchstart' in document.body) {
-    const menu = $('#find-styles-sources');
-    const menuData = menu.dataset;
-    const closeOnOutsideTouch = event => {
-      if (!menu.contains(event.target)) {
-        delete menuData.show;
-        window.removeEventListener('touchstart', closeOnOutsideTouch);
-      }
-    };
-    findStylesElement.onclick = event => {
-      if (menuData.show) {
-        closeOnOutsideTouch(event);
-      } else {
-        menuData.show = true;
-        window.addEventListener('touchstart', closeOnOutsideTouch);
-        event.preventDefault();
-      }
-    };
-  }
-  // freestyler: strip 'www.' when hostname has 3+ parts
-  $('#find-styles a[href*="freestyler"]').href +=
-    encodeURIComponent(new URL(tabURL).hostname.replace(/^www\.(?=.+?\.)/, ''));
-  // userstyles: send just 'file:' for file:// links
-  $('#find-styles a[href*="userstyles"]').href +=
-    encodeURIComponent(tabURL.startsWith('file:') ? 'file:' : tabURL);
-  // set the default link to the last used one
-  $$(`#find-styles a[data-pref-value="${(prefs.get('popup.findStylesSource') || 'userstyles')}"]`)
-    .forEach(a => (findStylesElement.href = a.href));
-
-  getActiveTab().then(function ping(tab, retryCountdown = 10) {
-    chrome.tabs.sendMessage(tab.id, {method: 'ping'}, {frameId: 0}, pong => {
-      if (pong) {
-        return;
-      }
-      ignoreChromeError();
-      // FF and some Chrome forks (e.g. CentBrowser) implement tab-on-demand
-      // so we'll wait a bit to handle popup being invoked right after switching
-      if (
-        retryCountdown > 0 && (
-          tab.status !== 'complete' ||
-          FIREFOX && tab.url === 'about:blank'
-        )
-      ) {
-        setTimeout(ping, 100, tab, --retryCountdown);
-      } else {
-        document.body.classList.add('unreachable');
-        document.body.insertBefore(template.unreachableInfo, document.body.firstChild);
-      }
-    });
-  });
-
-  // Write new style links
-  const writeStyle = $('#write-style');
-  const matchTargets = document.createElement('span');
-  const matchWrapper = document.createElement('span');
-  matchWrapper.id = 'match';
-  matchWrapper.appendChild(matchTargets);
-
-  // For this URL
-  const urlLink = template.writeStyle.cloneNode(true);
-  Object.assign(urlLink, {
-    href: 'edit.html?url-prefix=' + encodeURIComponent(tabURL),
-    title: `url-prefix("${tabURL}")`,
-    textContent: prefs.get('popup.breadcrumbs.usePath')
-      ? new URL(tabURL).pathname.slice(1)
-      // this&nbsp;URL
-      : t('writeStyleForURL').replace(/ /g, '\u00a0'),
-    onclick: handleEvent.openLink,
-  });
-  if (prefs.get('popup.breadcrumbs')) {
-    urlLink.onmouseenter =
-      urlLink.onfocus = () => urlLink.parentNode.classList.add('url()');
-    urlLink.onmouseleave =
-      urlLink.onblur = () => urlLink.parentNode.classList.remove('url()');
-  }
-  matchTargets.appendChild(urlLink);
-
-  // For domain
-  const domains = BG.getDomains(tabURL);
-  for (const domain of domains) {
-    const numParts = domain.length - domain.replace(/\./g, '').length + 1;
-    // Don't include TLD
-    if (domains.length > 1 && numParts === 1) {
-      continue;
-    }
-    const domainLink = template.writeStyle.cloneNode(true);
-    Object.assign(domainLink, {
-      href: 'edit.html?domain=' + encodeURIComponent(domain),
-      textContent: numParts > 2 ? domain.split('.')[0] : domain,
-      title: `domain("${domain}")`,
-      onclick: handleEvent.openLink,
-    });
-    domainLink.setAttribute('subdomain', numParts > 1 ? 'true' : '');
-    matchTargets.appendChild(domainLink);
-  }
-
-  if (prefs.get('popup.breadcrumbs')) {
-    matchTargets.classList.add('breadcrumbs');
-    matchTargets.appendChild(matchTargets.removeChild(matchTargets.firstElementChild));
-  }
-  writeStyle.appendChild(matchWrapper);
+  window.dispatchEvent(new CustomEvent('initPopup:done'));
 }
 
 
@@ -447,90 +338,4 @@ function handleUpdate(style) {
 
 function handleDelete(id) {
   $$(ENTRY_ID_PREFIX + id).forEach(el => el.remove());
-}
-
-
-/*
-  According to CSS4 @document specification the entire URL must match.
-  Stylish-for-Chrome implemented it incorrectly since the very beginning.
-  We'll detect styles that abuse the bug by finding the sections that
-  would have been applied by Stylish but not by us as we follow the spec.
-  Additionally we'll check for invalid regexps.
-*/
-function detectSloppyRegexps({entry, style}) {
-  // make sure all regexps are compiled
-  const rxCache = BG.cachedStyles.regexps;
-  let hasRegExp = false;
-  for (const section of style.sections) {
-    for (const regexp of section.regexps) {
-      hasRegExp = true;
-      for (let pass = 1; pass <= 2; pass++) {
-        const cacheKey = pass === 1 ? regexp : BG.SLOPPY_REGEXP_PREFIX + regexp;
-        if (!rxCache.has(cacheKey)) {
-          // according to CSS4 @document specification the entire URL must match
-          const anchored = pass === 1 ? '^(?:' + regexp + ')$' : '^' + regexp + '$';
-          // create in the bg context to avoid leaking of "dead objects"
-          const rx = BG.tryRegExp(anchored);
-          rxCache.set(cacheKey, rx || false);
-        }
-      }
-    }
-  }
-  if (!hasRegExp) {
-    return;
-  }
-  const {
-    appliedSections =
-      BG.getApplicableSections({style, matchUrl: tabURL}),
-    wannabeSections =
-      BG.getApplicableSections({style, matchUrl: tabURL, strictRegexp: false}),
-  } = style;
-
-  entry.hasInvalidRegexps = wannabeSections.some(section =>
-    section.regexps.some(rx => !rxCache.has(rx)));
-  entry.sectionsSkipped = wannabeSections.length - appliedSections.length;
-
-  if (!appliedSections.length) {
-    entry.classList.add('not-applied');
-    $('.style-name', entry).title = t('styleNotAppliedRegexpProblemTooltip');
-  }
-  if (entry.sectionsSkipped || entry.hasInvalidRegexps) {
-    entry.classList.toggle('regexp-partial', entry.sectionsSkipped);
-    entry.classList.toggle('regexp-invalid', entry.hasInvalidRegexps);
-    const indicator = template.regexpProblemIndicator.cloneNode(true);
-    indicator.appendChild(document.createTextNode(entry.sectionsSkipped || '!'));
-    indicator.onclick = handleEvent.indicator;
-    $('.main-controls', entry).appendChild(indicator);
-  }
-}
-
-
-function getTabRealURLFirefox(tab) {
-  // wait for FF tab-on-demand to get a real URL (initially about:blank), 5 sec max
-  return new Promise(resolve => {
-    function onNavigation({tabId, url, frameId}) {
-      if (tabId === tab.id && frameId === 0) {
-        detach();
-        resolve(url);
-      }
-    }
-
-    function detach(timedOut) {
-      if (timedOut) {
-        resolve(tab.url);
-      } else {
-        debounce.unregister(detach);
-      }
-      chrome.webNavigation.onBeforeNavigate.removeListener(onNavigation);
-      chrome.webNavigation.onCommitted.removeListener(onNavigation);
-      chrome.tabs.onRemoved.removeListener(detach);
-      chrome.tabs.onReplaced.removeListener(detach);
-    }
-
-    chrome.webNavigation.onBeforeNavigate.addListener(onNavigation);
-    chrome.webNavigation.onCommitted.addListener(onNavigation);
-    chrome.tabs.onRemoved.addListener(detach);
-    chrome.tabs.onReplaced.addListener(detach);
-    debounce(detach, 5000, {timedOut: true});
-  });
 }
