@@ -17,10 +17,11 @@ function applyUpdateAll() {
   setTimeout(() => {
     btnApply.classList.add('hidden');
     btnApply.disabled = false;
-    renderUpdatesOnlyFilter({show: false});
+    renderUpdatesOnlyFilter();
   }, 1000);
 
-  $$('.can-update .update').forEach(button => {
+  const includingProblems = btnApply.ignoreDigest ? '' : ':not(.update-problem)';
+  $$(`.can-update${includingProblems} .update`).forEach(button => {
     scrollElementIntoView(button);
     button.click();
   });
@@ -31,12 +32,15 @@ function checkUpdateAll() {
   document.body.classList.add('update-in-progress');
   $('#check-all-updates').disabled = true;
   $('#check-all-updates-force').classList.add('hidden');
-  $('#apply-all-updates').classList.add('hidden');
+  const btnApply = $('#apply-all-updates');
+  btnApply.classList.add('hidden');
   $('#update-all-no-updates').classList.add('hidden');
 
   const ignoreDigest = this && this.id === 'check-all-updates-force';
+  btnApply.ignoreDigest = ignoreDigest;
+
   $$('.updatable:not(.can-update)' + (ignoreDigest ? '' : ':not(.update-problem)'))
-    .map(el => checkUpdate(el, {single: false}));
+    .forEach(el => checkUpdate(el, {single: false}));
 
   let total = 0;
   let checked = 0;
@@ -51,11 +55,11 @@ function checkUpdateAll() {
         total = value;
         break;
       case BG.updater.UPDATED:
-        if (++updated === 1) {
-          $('#apply-all-updates').disabled = true;
-          $('#apply-all-updates').classList.remove('hidden');
+        if ((details !== BG.updater.EDITED || ignoreDigest) && ++updated === 1) {
+          btnApply.disabled = true;
+          btnApply.classList.remove('hidden');
         }
-        $('#apply-all-updates').dataset.value = updated;
+        btnApply.dataset.value = updated;
         // fallthrough
       case BG.updater.SKIPPED:
         checked++;
@@ -73,7 +77,7 @@ function checkUpdateAll() {
   function done() {
     document.body.classList.remove('update-in-progress');
     $('#check-all-updates').disabled = total === 0;
-    $('#apply-all-updates').disabled = false;
+    btnApply.disabled = false;
     renderUpdatesOnlyFilter({check: updated + skippedEdited > 0});
     if (!updated) {
       $('#update-all-no-updates').dataset.skippedEdited = skippedEdited > 0;
@@ -102,13 +106,18 @@ function checkUpdate(entry, {single = true} = {}) {
 
 function reportUpdateState(state, style, details) {
   const entry = $(ENTRY_ID_PREFIX + style.id);
-  entry.classList.remove('checking-update');
+  entry.classList.remove('checking-update', 'no-update', 'update-problem');
   switch (state) {
     case BG.updater.UPDATED:
       entry.classList.add('can-update');
       entry.updatedCode = style;
       $('.update-note', entry).textContent = '';
       $('#onlyUpdates').classList.remove('hidden');
+      if (details === BG.updater.EDITED) {
+        entry.classList.add('update-problem');
+        entry.dataset.details = details;
+        $('.update', entry).title = t('updateCheckManualUpdateForce');
+      }
       break;
     case BG.updater.SKIPPED: {
       if (entry.classList.contains('can-update')) {
@@ -145,7 +154,9 @@ function reportUpdateState(state, style, details) {
 
 
 function renderUpdatesOnlyFilter({show, check} = {}) {
-  const numUpdatable = $$('.can-update').length;
+  const btnApply = $('#apply-all-updates');
+  const includingProblems = btnApply.ignoreDigest ? '' : ':not(.update-problem)';
+  const numUpdatable = $$('.can-update' + includingProblems).length;
   const mightUpdate = numUpdatable > 0 || $('.update-problem');
   const checkbox = $('#onlyUpdates input');
   show = show !== undefined ? show : mightUpdate;
@@ -155,7 +166,6 @@ function renderUpdatesOnlyFilter({show, check} = {}) {
   checkbox.checked = check;
   checkbox.dispatchEvent(new Event('change'));
 
-  const btnApply = $('#apply-all-updates');
   if (!btnApply.matches('.hidden')) {
     if (numUpdatable > 0) {
       btnApply.dataset.value = numUpdatable;

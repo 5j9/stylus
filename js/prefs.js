@@ -60,6 +60,7 @@ var prefs = new function Prefs() {
     'popupWidth': 246,              // popup width in pixels
 
     'updateInterval': 24,           // user-style automatic update interval, hours (0 = disable)
+    'updateCheckEditedToo': false,  // manage::updater checks edited styles on first check
   };
   const values = deepCopy(defaults);
 

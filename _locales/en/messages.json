@@ -775,6 +775,9 @@
   "optionsUpdateImportNote": {
     "message": "When importing style backups from old version or from Stylish, do a one-time check for updates manually in the styles manager to ensure all styles are updated."
   },
+  "optionsUpdateCheckEditedToo": {
+    "message": "Include locally edited external styles when checking for updates in the style manager"
+  },
   "optionsCustomizeIcon": {
     "message": "Toolbar icon"
   },

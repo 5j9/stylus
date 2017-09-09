@@ -53,12 +53,13 @@ var updater = {
 
     'ignoreDigest' option is set on the second manual individual update check on the manage page.
     */
+    let edited;
     return (ignoreDigest ? Promise.resolve() : calcStyleDigest(style))
       .then(maybeFetchMd5)
       .then(maybeFetchCode)
       .then(maybeSave)
       .then(saved => {
-        observer(updater.UPDATED, saved);
+        observer(updater.UPDATED, saved, edited && updater.EDITED);
         updater.log(updater.UPDATED + ` #${saved.id} ${saved.name}`);
       })
       .catch(err => {
@@ -68,7 +69,9 @@ var updater = {
       });
 
     function maybeFetchMd5(digest) {
-      if (!ignoreDigest && style.originalDigest && style.originalDigest !== digest) {
+      edited = style.originalDigest && style.originalDigest !== digest;
+      if (!ignoreDigest && edited && !prefs.get('updateCheckEditedToo')) {
+        // skip edited styles during background auto-update and when not allowed in the manager
         return Promise.reject(updater.EDITED);
       }
       return download(style.md5Url);
@@ -78,7 +81,7 @@ var updater = {
       if (!md5 || md5.length !== 32) {
         return Promise.reject(updater.ERROR_MD5);
       }
-      if (md5 === style.originalMd5 && style.originalDigest && !ignoreDigest) {
+      if (md5 === style.originalMd5 && style.originalDigest && !ignoreDigest && !edited) {
         return Promise.reject(updater.SAME_MD5);
       }
       return download(style.updateUrl);
